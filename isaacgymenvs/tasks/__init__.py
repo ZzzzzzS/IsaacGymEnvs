@@ -112,3 +112,8 @@ isaacgym_task_map = {
     "ShadowHand": ShadowHand,
     "Trifinger": Trifinger,
 }
+
+import os
+if os.path.exists('./isaacgymenvs/CustomEnvironments'):
+    from isaacgymenvs.CustomEnvironments import isaacgym_extra_task_map
+    isaacgym_task_map.update(isaacgym_extra_task_map)

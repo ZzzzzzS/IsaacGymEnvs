@@ -1,0 +1,3 @@
+[submodule "isaacgymenvs/CustomEnvironments"]
+	path = isaacgymenvs/CustomEnvironments
+	url = git@github.com:ZzzzzzS/IsaacgymExperiments.git

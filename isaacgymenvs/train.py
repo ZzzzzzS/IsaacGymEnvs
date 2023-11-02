@@ -94,12 +94,18 @@ def launch_rlg_hydra(cfg: DictConfig):
     from rl_games.common import env_configurations, vecenv
     from rl_games.torch_runner import Runner
     from rl_games.algos_torch import model_builder
-
-    from isaacgymenvs.CustomAlgorithm.ppo import PPOAgent  # HACK: add my algorithm
-    from isaacgymenvs.CustomAlgorithm.ppo import PPOPlayer
-    from isaacgymenvs.CustomAlgorithm.ppo2 import online_algorithm_agent
-    from isaacgymenvs.CustomAlgorithm.ppo2 import online_algorithm_player
-    from isaacgymenvs.CustomAlgorithm.rl_games_adapter import MyNetBuilder
+    from isaacgymenvs.learning import amp_continuous
+    from isaacgymenvs.learning import amp_players
+    from isaacgymenvs.learning import amp_models
+    from isaacgymenvs.learning import amp_network_builder
+    
+    import os
+    if os.path.exists("./isaacgymenvs/CustomAlgorithm"):
+        from isaacgymenvs.CustomAlgorithm.ppo import PPOAgent  # HACK: add my algorithm
+        from isaacgymenvs.CustomAlgorithm.ppo import PPOPlayer
+        from isaacgymenvs.CustomAlgorithm.ppo2 import online_algorithm_agent
+        from isaacgymenvs.CustomAlgorithm.ppo2 import online_algorithm_player
+        from isaacgymenvs.CustomAlgorithm.rl_games_adapter import MyNetBuilder
 
     import isaacgymenvs
 
@@ -193,20 +199,26 @@ def launch_rlg_hydra(cfg: DictConfig):
 
     def build_runner(algo_observer):
         runner = Runner(algo_observer)
-        # HACK: regist my algorithm
-        runner.algo_factory.register_builder(
-            'myppo', lambda **kwargs: PPOAgent.MyPPOAgent(**kwargs))
-        runner.player_factory.register_builder(
-            'myppo', lambda **kwargs: PPOPlayer.MyPPOPlayer(**kwargs)
-        )
+        runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
+        runner.player_factory.register_builder('amp_continuous', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
+        model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
+        model_builder.register_network('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
+        
+        if os.path.exists("./isaacgymenvs/CustomAlgorithm"):
+            # HACK: regist my algorithm
+            runner.algo_factory.register_builder(
+                'myppo', lambda **kwargs: PPOAgent.MyPPOAgent(**kwargs))
+            runner.player_factory.register_builder(
+                'myppo', lambda **kwargs: PPOPlayer.MyPPOPlayer(**kwargs)
+            )
 
-        runner.algo_factory.register_builder(
-            'ppo2', lambda **kwargs: online_algorithm_agent.online_algorithm_agent(**kwargs))
-        runner.player_factory.register_builder(
-            'ppo2', lambda ** kwargs: online_algorithm_player.online_algorithm_player(**kwargs))
+            runner.algo_factory.register_builder(
+                'ppo2', lambda **kwargs: online_algorithm_agent.online_algorithm_agent(**kwargs))
+            runner.player_factory.register_builder(
+                'ppo2', lambda ** kwargs: online_algorithm_player.online_algorithm_player(**kwargs))
 
-        model_builder.register_network(
-            'my_mlp', lambda **kwargs: MyNetBuilder.MyMLPBuilder())
+            model_builder.register_network(
+                'my_mlp', lambda **kwargs: MyNetBuilder.MyMLPBuilder())
         return runner
 
     # convert CLI arguments into dictionary

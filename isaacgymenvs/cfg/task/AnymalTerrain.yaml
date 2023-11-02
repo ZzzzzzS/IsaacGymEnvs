@@ -16,12 +16,12 @@ env:
     dynamicFriction: 1.0  # [-]
     restitution: 0.        # [-]
     # rough terrain only:
-    curriculum: true
+    curriculum: True
     maxInitMapLevel: 0
     mapLength: 8.
     mapWidth: 8.
-    numLevels: 10
-    numTerrains: 20
+    numLevels: 8
+    numTerrains: 8
     # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
     terrainProportions: [0.1, 0.1, 0.35, 0.25, 0.2]
     # tri mesh only:
@@ -35,9 +35,9 @@ env:
 
   randomCommandVelocityRanges:
     # train
-    linear_x: [-1., 1.] # min max [m/s]
-    linear_y: [-1., 1.]   # min max [m/s]
-    yaw: [-3.14, 3.14]    # min max [rad/s]
+    linear_x: [0.5, 1.5] # min max [m/s]
+    linear_y: [-0.3, 0.3]   # min max [m/s]
+    yaw: [-0.1, 0.1]    # min max [rad/s]
 
   control:
     # PD Drive parameters:

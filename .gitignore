@@ -31,3 +31,7 @@ runs/
 outputs/
 *.hydra*
 /isaacgymenvs/wandb
+isaacgymenvs/.vscode/
+isaacgymenvs/recorded_frames/
+recorded_frames/
+.vscode/

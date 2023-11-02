@@ -2,13 +2,18 @@ params:
   seed: ${...seed}
 
   algo:
-    name: a2c_continuous
+    #name: a2c_continuous
+    #name: myppo
+    name: ppo2
 
   model:
-    name: continuous_a2c_logstd
+    #name: continuous_a2c_logstd
+    name: A2CModule_Continuous
 
   network:
-    name: actor_critic
+    #name: actor_critic
+    #name: my_mlp
+    name: seperate_symmetry_MLP_A2CNetwork
     separate: False
     space:
       continuous:
@@ -19,7 +24,7 @@ params:
           name: default
         sigma_init:
           name: const_initializer
-          val: 0
+          val: 1.0
         fixed_sigma: True
     mlp:
       units: [32, 32]
@@ -43,6 +48,7 @@ params:
     normalize_input: True
     normalize_value: True
     num_actors: ${....task.env.numEnvs}
+    reward_scaling: True
     reward_shaper:
       scale_value: 0.1
     normalize_advantage: True
@@ -52,11 +58,11 @@ params:
     lr_schedule: adaptive
     kl_threshold: 0.008
     score_to_win: 20000
-    max_epochs: ${resolve_default:100,${....max_iterations}}
+    max_epochs: ${resolve_default:500,${....max_iterations}}
     save_best_after: 50
     save_frequency: 25
     grad_norm: 1.0
-    entropy_coef: 0.0
+    entropy_coef: 0
     truncate_grads: True
     e_clip: 0.2
     horizon_length: 16

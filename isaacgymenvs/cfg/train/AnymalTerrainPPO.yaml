@@ -2,13 +2,18 @@ params:
   seed: ${...seed}
 
   algo:
-    name: a2c_continuous
+    #name: a2c_continuous
+    #name: myppo
+    name: ppo2
 
   model:
-    name: continuous_a2c_logstd
+    #name: continuous_a2c_logstd
+    name: A2CModule_Continuous
 
   network:
-    name: actor_critic
+    #name: actor_critic
+    #name: my_mlp
+    name: seperate_symmetry_MLP_A2CNetwork
     separate: True
 
     space:
@@ -19,7 +24,7 @@ params:
           name: default
         sigma_init:
           name: const_initializer
-          val: 0. # std = 1.
+          val: 1. # std = 1.
         fixed_sigma: True
 
     mlp:
@@ -50,8 +55,9 @@ params:
     ppo: True
     multi_gpu: ${....multi_gpu}
     mixed_precision: True
-    normalize_input: True
-    normalize_value: True
+    normalize_input: False
+    normalize_value: False
+    reward_scaling: True
     normalize_advantage: True
     value_bootstrap: True
     clip_actions: False
@@ -62,7 +68,7 @@ params:
     tau: 0.95
     e_clip: 0.2
     entropy_coef: 0.001
-    learning_rate: 3.e-4 # overwritten by adaptive lr_schedule
+    learning_rate: 1.e-4 # overwritten by adaptive lr_schedule
     lr_schedule: adaptive
     kl_threshold: 0.008 # target kl for adaptive lr
     truncate_grads: True

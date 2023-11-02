@@ -35,13 +35,14 @@ import gym
 from gym import spaces
 
 from isaacgym import gymtorch, gymapi
-from isaacgymenvs.utils.torch_jit_utils import to_torch
+from isaacgymenvs.utils.torch_jit_utils import to_torch, quat_apply
 from isaacgymenvs.utils.dr_utils import get_property_setter_map, get_property_getter_map, \
     get_default_setter_args, apply_random_samples, check_buckets, generate_random_samples
 
 import torch
 import numpy as np
-import operator, random
+import operator
+import random
 from copy import deepcopy
 from isaacgymenvs.utils.utils import nested_dict_get_attr, nested_dict_set_attr
 
@@ -55,6 +56,7 @@ from abc import ABC
 EXISTING_SIM = None
 SCREEN_CAPTURE_RESOLUTION = (1027, 768)
 
+
 def _create_sim_once(gym, *args, **kwargs):
     global EXISTING_SIM
     if EXISTING_SIM is not None:
@@ -65,7 +67,7 @@ def _create_sim_once(gym, *args, **kwargs):
 
 
 class Env(ABC):
-    def __init__(self, config: Dict[str, Any], rl_device: str, sim_device: str, graphics_device_id: int, headless: bool): 
+    def __init__(self, config: Dict[str, Any], rl_device: str, sim_device: str, graphics_device_id: int, headless: bool):
         """Initialise the env.
 
         Args:
@@ -84,7 +86,8 @@ class Env(ABC):
             if self.device_type.lower() == "cuda" or self.device_type.lower() == "gpu":
                 self.device = "cuda" + ":" + str(self.device_id)
             else:
-                print("GPU Pipeline can only be used with GPU simulation. Forcing CPU Pipeline.")
+                print(
+                    "GPU Pipeline can only be used with GPU simulation. Forcing CPU Pipeline.")
                 config["sim"]["use_gpu_pipeline"] = False
 
         self.rl_device = rl_device
@@ -99,18 +102,22 @@ class Env(ABC):
             self.graphics_device_id = -1
 
         self.num_environments = config["env"]["numEnvs"]
-        self.num_agents = config["env"].get("numAgents", 1)  # used for multi-agent environments
+        # used for multi-agent environments
+        self.num_agents = config["env"].get("numAgents", 1)
 
         self.num_observations = config["env"].get("numObservations", 0)
         self.num_states = config["env"].get("numStates", 0)
 
-        self.obs_space = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
-        self.state_space = spaces.Box(np.ones(self.num_states) * -np.Inf, np.ones(self.num_states) * np.Inf)
+        self.obs_space = spaces.Box(
+            np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+        self.state_space = spaces.Box(
+            np.ones(self.num_states) * -np.Inf, np.ones(self.num_states) * np.Inf)
 
         self.num_actions = config["env"]["numActions"]
         self.control_freq_inv = config["env"].get("controlFrequencyInv", 1)
 
-        self.act_space = spaces.Box(np.ones(self.num_actions) * -1., np.ones(self.num_actions) * 1.)
+        self.act_space = spaces.Box(
+            np.ones(self.num_actions) * -1., np.ones(self.num_actions) * 1.)
 
         self.clip_obs = config["env"].get("clipObservations", np.Inf)
         self.clip_actions = config["env"].get("clipActions", np.Inf)
@@ -129,9 +136,10 @@ class Env(ABC):
         self.last_frame_time: float = 0.0
 
         self.record_frames: bool = False
-        self.record_frames_dir = join("recorded_frames", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        self.record_frames_dir = join(
+            "recorded_frames", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
 
-    @abc.abstractmethod 
+    @abc.abstractmethod
     def allocate_buffers(self):
         """Create torch buffers for observations, rewards, actions dones and any additional data."""
 
@@ -146,7 +154,7 @@ class Env(ABC):
         """
 
     @abc.abstractmethod
-    def reset(self)-> Dict[str, torch.Tensor]:
+    def reset(self) -> Dict[str, torch.Tensor]:
         """Reset the environment.
         Returns:
             Observation dictionary
@@ -206,9 +214,10 @@ class Env(ABC):
 
 class VecTask(Env):
 
-    metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 24}
+    metadata = {"render.modes": [
+        "human", "rgb_array"], "video.frames_per_second": 24}
 
-    def __init__(self, config, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture: bool = False, force_render: bool = False): 
+    def __init__(self, config, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture: bool = False, force_render: bool = False):
         """Initialise the `VecTask`.
 
         Args:
@@ -229,7 +238,8 @@ class VecTask(Env):
             self.virtual_display.start()
         self.force_render = force_render
 
-        self.sim_params = self.__parse_sim_params(self.cfg["physics_engine"], self.cfg["sim"])
+        self.sim_params = self.__parse_sim_params(
+            self.cfg["physics_engine"], self.cfg["sim"])
         if self.cfg["physics_engine"] == "physx":
             self.physics_engine = gymapi.SIM_PHYSX
         elif self.cfg["physics_engine"] == "flex":
@@ -273,6 +283,7 @@ class VecTask(Env):
         # todo: read from config
         self.enable_viewer_sync = True
         self.viewer = None
+        self.viewer_move = gymapi.Vec3(0, 0, 0)
 
         # if running with a viewer, set up keyboard shortcuts and camera
         if self.headless == False:
@@ -285,6 +296,22 @@ class VecTask(Env):
                 self.viewer, gymapi.KEY_V, "toggle_viewer_sync")
             self.gym.subscribe_viewer_keyboard_event(
                 self.viewer, gymapi.KEY_R, "record_frames")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_W, "move_forward")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_S, "move_backward")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_A, "move_left")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_D, "move_right")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_Q, "move_down")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_E, "move_up")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_SPACE, "move_up")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_LEFT_SHIFT, "move_down")
 
             # set the camera position based on up axis
             sim_params = self.gym.get_sim_params(self.sim)
@@ -316,7 +343,7 @@ class VecTask(Env):
         self.reset_buf = torch.ones(
             self.num_envs, device=self.device, dtype=torch.long)
         self.timeout_buf = torch.zeros(
-             self.num_envs, device=self.device, dtype=torch.long)
+            self.num_envs, device=self.device, dtype=torch.long)
         self.progress_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long)
         self.randomize_buf = torch.zeros(
@@ -334,7 +361,8 @@ class VecTask(Env):
         Returns:
             the Isaac Gym sim object.
         """
-        sim = _create_sim_once(self.gym, compute_device, graphics_device, physics_engine, sim_params)
+        sim = _create_sim_once(self.gym, compute_device,
+                               graphics_device, physics_engine, sim_params)
         if sim is None:
             print("*** Failed to create sim")
             quit()
@@ -369,9 +397,11 @@ class VecTask(Env):
 
         # randomize actions
         if self.dr_randomizations.get('actions', None):
-            actions = self.dr_randomizations['actions']['noise_lambda'](actions)
+            actions = self.dr_randomizations['actions']['noise_lambda'](
+                actions)
 
-        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        action_tensor = torch.clamp(
+            actions, -self.clip_actions, self.clip_actions)
         # apply actions
         self.pre_physics_step(action_tensor)
 
@@ -391,15 +421,18 @@ class VecTask(Env):
         self.control_steps += 1
 
         # fill time out buffer: set to 1 if we reached the max episode length AND the reset buffer is 1. Timeout == 1 makes sense only if the reset buffer is 1.
-        self.timeout_buf = (self.progress_buf >= self.max_episode_length - 1) & (self.reset_buf != 0)
+        self.timeout_buf = (self.progress_buf >=
+                            self.max_episode_length - 1) & (self.reset_buf != 0)
 
         # randomize observations
         if self.dr_randomizations.get('observations', None):
-            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
+            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](
+                self.obs_buf)
 
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
 
-        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs"] = torch.clamp(
+            self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:
@@ -413,14 +446,15 @@ class VecTask(Env):
         Returns:
             A buffer of zero torch actions
         """
-        actions = torch.zeros([self.num_envs, self.num_actions], dtype=torch.float32, device=self.rl_device)
+        actions = torch.zeros(
+            [self.num_envs, self.num_actions], dtype=torch.float32, device=self.rl_device)
 
         return actions
 
     def reset_idx(self, env_idx):
         """Reset environment with indces in env_idx. 
         Should be implemented in an environment class inherited from VecTask.
-        """  
+        """
         pass
 
     def reset(self):
@@ -429,7 +463,8 @@ class VecTask(Env):
         Returns:
             Observation dictionary
         """
-        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs"] = torch.clamp(
+            self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:
@@ -446,7 +481,8 @@ class VecTask(Env):
         if len(done_env_ids) > 0:
             self.reset_idx(done_env_ids)
 
-        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs"] = torch.clamp(
+            self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:
@@ -461,6 +497,8 @@ class VecTask(Env):
             if self.gym.query_viewer_has_closed(self.viewer):
                 sys.exit()
 
+            camera_pos = self.gym.get_viewer_camera_transform(
+                self.viewer, None)
             # check for keyboard events
             for evt in self.gym.query_viewer_action_events(self.viewer):
                 if evt.action == "QUIT" and evt.value > 0:
@@ -469,6 +507,18 @@ class VecTask(Env):
                     self.enable_viewer_sync = not self.enable_viewer_sync
                 elif evt.action == "record_frames" and evt.value > 0:
                     self.record_frames = not self.record_frames
+                elif evt.action == "move_forward":
+                    self.viewer_move.z = evt.value*0.5
+                elif evt.action == "move_backward":
+                    self.viewer_move.z = -evt.value*0.5
+                elif evt.action == "move_left":
+                    self.viewer_move.x = evt.value*0.5
+                elif evt.action == "move_right":
+                    self.viewer_move.x = -evt.value*0.5
+                elif evt.action == "move_up":
+                    self.viewer_move.y = evt.value*0.5
+                elif evt.action == "move_down":
+                    self.viewer_move.y = -evt.value*0.5
 
             # fetch results
             if self.device != 'cpu':
@@ -498,6 +548,28 @@ class VecTask(Env):
 
                 self.last_frame_time = time.time()
 
+                if ((self.viewer_move.x != 0.0) or (self.viewer_move.y != 0.0) or (self.viewer_move.z != 0.0)):
+                    viewer_pos = self.gym.get_viewer_camera_transform(
+                        self.viewer, None)
+                    viewer_trans_tensor = torch.tensor(
+                        [viewer_pos.p.x, viewer_pos.p.y, viewer_pos.p.z])
+                    viewer_quat_tensor = torch.tensor(
+                        [viewer_pos.r.x, viewer_pos.r.y, viewer_pos.r.z, viewer_pos.r.w])
+                    z = torch.tensor([0.0, 0.0, 1.0])
+                    look_at = quat_apply(viewer_quat_tensor, z)
+                    move_torch = torch.tensor(
+                        [self.viewer_move.x, 0, self.viewer_move.z])
+                    offset = quat_apply(viewer_quat_tensor, move_torch)
+                    offset[2] = self.viewer_move.y+offset[2]
+                    new_pos = offset+viewer_trans_tensor
+                    new_look = look_at+new_pos
+                    new_pos_gym = gymapi.Vec3(
+                        new_pos[0], new_pos[1], new_pos[2])
+                    new_look_gym = gymapi.Vec3(
+                        new_look[0], new_look[1], new_look[2])
+                    self.gym.viewer_camera_look_at(
+                        self.viewer, None, new_pos_gym, new_look_gym)
+
             else:
                 self.gym.poll_viewer_events(self.viewer)
 
@@ -505,7 +577,8 @@ class VecTask(Env):
                 if not os.path.isdir(self.record_frames_dir):
                     os.makedirs(self.record_frames_dir, exist_ok=True)
 
-                self.gym.write_viewer_image_to_file(self.viewer, join(self.record_frames_dir, f"frame_{self.control_steps}.png"))
+                self.gym.write_viewer_image_to_file(self.viewer, join(
+                    self.record_frames_dir, f"frame_{self.control_steps}.png"))
 
             if self.virtual_display and mode == "rgb_array":
                 img = self.virtual_display.grab()
@@ -549,9 +622,11 @@ class VecTask(Env):
             if "physx" in config_sim:
                 for opt in config_sim["physx"].keys():
                     if opt == "contact_collection":
-                        setattr(sim_params.physx, opt, gymapi.ContactCollection(config_sim["physx"][opt]))
+                        setattr(sim_params.physx, opt, gymapi.ContactCollection(
+                            config_sim["physx"][opt]))
                     else:
-                        setattr(sim_params.physx, opt, config_sim["physx"][opt])
+                        setattr(sim_params.physx, opt,
+                                config_sim["physx"][opt])
         else:
             # set the parameters
             if "flex" in config_sim:
@@ -628,10 +703,13 @@ class VecTask(Env):
             do_nonenv_randomize = True
             env_ids = list(range(self.num_envs))
         else:
-            do_nonenv_randomize = (self.last_step - self.last_rand_step) >= rand_freq
-            rand_envs = torch.where(self.randomize_buf >= rand_freq, torch.ones_like(self.randomize_buf), torch.zeros_like(self.randomize_buf))
+            do_nonenv_randomize = (
+                self.last_step - self.last_rand_step) >= rand_freq
+            rand_envs = torch.where(self.randomize_buf >= rand_freq, torch.ones_like(
+                self.randomize_buf), torch.zeros_like(self.randomize_buf))
             rand_envs = torch.logical_and(rand_envs, self.reset_buf)
-            env_ids = torch.nonzero(rand_envs, as_tuple=False).squeeze(-1).tolist()
+            env_ids = torch.nonzero(
+                rand_envs, as_tuple=False).squeeze(-1).tolist()
             self.randomize_buf[rand_envs] = 0
 
         if do_nonenv_randomize:
@@ -663,7 +741,8 @@ class VecTask(Env):
 
                 if dist == 'gaussian':
                     mu, var = dr_params[nonphysical_param]["range"]
-                    mu_corr, var_corr = dr_params[nonphysical_param].get("range_correlated", [0., 0.])
+                    mu_corr, var_corr = dr_params[nonphysical_param].get(
+                        "range_correlated", [0., 0.])
 
                     if op_type == 'additive':
                         mu *= sched_scaling
@@ -689,11 +768,13 @@ class VecTask(Env):
                         return op(
                             tensor, corr + torch.randn_like(tensor) * params['var'] + params['mu'])
 
-                    self.dr_randomizations[nonphysical_param] = {'mu': mu, 'var': var, 'mu_corr': mu_corr, 'var_corr': var_corr, 'noise_lambda': noise_lambda}
+                    self.dr_randomizations[nonphysical_param] = {
+                        'mu': mu, 'var': var, 'mu_corr': mu_corr, 'var_corr': var_corr, 'noise_lambda': noise_lambda}
 
                 elif dist == 'uniform':
                     lo, hi = dr_params[nonphysical_param]["range"]
-                    lo_corr, hi_corr = dr_params[nonphysical_param].get("range_correlated", [0., 0.])
+                    lo_corr, hi_corr = dr_params[nonphysical_param].get(
+                        "range_correlated", [0., 0.])
 
                     if op_type == 'additive':
                         lo *= sched_scaling
@@ -703,8 +784,10 @@ class VecTask(Env):
                     elif op_type == 'scaling':
                         lo = lo * sched_scaling + 1.0 * (1.0 - sched_scaling)
                         hi = hi * sched_scaling + 1.0 * (1.0 - sched_scaling)
-                        lo_corr = lo_corr * sched_scaling + 1.0 * (1.0 - sched_scaling)
-                        hi_corr = hi_corr * sched_scaling + 1.0 * (1.0 - sched_scaling)
+                        lo_corr = lo_corr * sched_scaling + \
+                            1.0 * (1.0 - sched_scaling)
+                        hi_corr = hi_corr * sched_scaling + \
+                            1.0 * (1.0 - sched_scaling)
 
                     def noise_lambda(tensor, param_name=nonphysical_param):
                         params = self.dr_randomizations[param_name]
@@ -712,10 +795,13 @@ class VecTask(Env):
                         if corr is None:
                             corr = torch.randn_like(tensor)
                             params['corr'] = corr
-                        corr = corr * (params['hi_corr'] - params['lo_corr']) + params['lo_corr']
+                        corr = corr * \
+                            (params['hi_corr'] - params['lo_corr']) + \
+                            params['lo_corr']
                         return op(tensor, corr + torch.rand_like(tensor) * (params['hi'] - params['lo']) + params['lo'])
 
-                    self.dr_randomizations[nonphysical_param] = {'lo': lo, 'hi': hi, 'lo_corr': lo_corr, 'hi_corr': hi_corr, 'noise_lambda': noise_lambda}
+                    self.dr_randomizations[nonphysical_param] = {
+                        'lo': lo, 'hi': hi, 'lo_corr': lo_corr, 'hi_corr': hi_corr, 'noise_lambda': noise_lambda}
 
         if "sim_params" in dr_params and do_nonenv_randomize:
             prop_attrs = dr_params["sim_params"]
@@ -746,21 +832,21 @@ class VecTask(Env):
         # randomise all attributes of each actor (hand, cube etc..)
         # actor_properties are (stiffness, damping etc..)
 
-        # Loop over actors, then loop over envs, then loop over their props 
-        # and lastly loop over the ranges of the params 
+        # Loop over actors, then loop over envs, then loop over their props
+        # and lastly loop over the ranges of the params
 
         for actor, actor_properties in dr_params["actor_params"].items():
 
-            # Loop over all envs as this part is not tensorised yet 
+            # Loop over all envs as this part is not tensorised yet
             for env_id in env_ids:
                 env = self.envs[env_id]
                 handle = self.gym.find_actor_handle(env, actor)
                 extern_sample = self.extern_actor_params[env_id]
 
-                # randomise dof_props, rigid_body, rigid_shape properties 
+                # randomise dof_props, rigid_body, rigid_shape properties
                 # all obtained from the YAML file
-                # EXAMPLE: prop name: dof_properties, rigid_body_properties, rigid_shape properties  
-                #          prop_attrs: 
+                # EXAMPLE: prop name: dof_properties, rigid_body_properties, rigid_shape properties
+                #          prop_attrs:
                 #               {'damping': {'range': [0.3, 3.0], 'operation': 'scaling', 'distribution': 'loguniform'}
                 #               {'stiffness': {'range': [0.75, 1.5], 'operation': 'scaling', 'distribution': 'loguniform'}
                 for prop_name, prop_attrs in actor_properties.items():
@@ -795,7 +881,8 @@ class VecTask(Env):
                                 {attr: getattr(p, attr) for attr in dir(p)} for p in prop]
                         for p, og_p in zip(prop, self.original_props[prop_name]):
                             for attr, attr_randomization_params in prop_attrs.items():
-                                setup_only = attr_randomization_params.get('setup_only', False)
+                                setup_only = attr_randomization_params.get(
+                                    'setup_only', False)
                                 if (setup_only and not self.sim_initialized) or not setup_only:
                                     smpl = None
                                     if self.actor_params_generator is not None:
@@ -810,7 +897,8 @@ class VecTask(Env):
                         if self.first_randomization:
                             self.original_props[prop_name] = deepcopy(prop)
                         for attr, attr_randomization_params in prop_attrs.items():
-                            setup_only = attr_randomization_params.get('setup_only', False)
+                            setup_only = attr_randomization_params.get(
+                                'setup_only', False)
                             if (setup_only and not self.sim_initialized) or not setup_only:
                                 smpl = None
                                 if self.actor_params_generator is not None:

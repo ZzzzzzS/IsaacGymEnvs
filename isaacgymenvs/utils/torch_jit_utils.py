@@ -39,7 +39,7 @@ def to_torch(x, dtype=torch.float, device='cuda:0', requires_grad=False):
 
 
 @torch.jit.script
-def quat_mul(a, b):
+def quat_mul(a, b):  # 四元数乘法
     assert a.shape == b.shape
     shape = a.shape
     a = a.reshape(-1, 4)
@@ -63,12 +63,12 @@ def quat_mul(a, b):
 
 
 @torch.jit.script
-def normalize(x, eps: float = 1e-9):
+def normalize(x, eps: float = 1e-9):  # 规一化
     return x / x.norm(p=2, dim=-1).clamp(min=eps, max=None).unsqueeze(-1)
 
 
 @torch.jit.script
-def quat_apply(a, b):
+def quat_apply(a, b):  # 四元数与点相乘(点的旋转)
     shape = b.shape
     a = a.reshape(-1, 4)
     b = b.reshape(-1, 3)
@@ -104,19 +104,19 @@ def quat_rotate_inverse(q, v):
 
 
 @torch.jit.script
-def quat_conjugate(a):
+def quat_conjugate(a):  # 共轭
     shape = a.shape
     a = a.reshape(-1, 4)
     return torch.cat((-a[:, :3], a[:, -1:]), dim=-1).view(shape)
 
 
 @torch.jit.script
-def quat_unit(a):
+def quat_unit(a):  # 单位四元数
     return normalize(a)
 
 
 @torch.jit.script
-def quat_from_angle_axis(angle, axis):
+def quat_from_angle_axis(angle, axis):  # 旋转向量转四元数
     theta = (angle / 2).unsqueeze(-1)
     xyz = normalize(axis) * theta.sin()
     w = theta.cos()
@@ -166,14 +166,14 @@ def get_axis_params(value, axis_idx, x_value=0., dtype=float, n_dims=3):
 
 
 @torch.jit.script
-def copysign(a, b):
+def copysign(a, b):  # 拷贝a并保留b的正负号
     # type: (float, Tensor) -> Tensor
     a = torch.tensor(a, device=b.device, dtype=torch.float).repeat(b.shape[0])
     return torch.abs(a) * torch.sign(b)
 
 
 @torch.jit.script
-def get_euler_xyz(q):
+def get_euler_xyz(q):  # 四元数转欧拉角
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
     sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
@@ -196,7 +196,7 @@ def get_euler_xyz(q):
 
 
 @torch.jit.script
-def quat_from_euler_xyz(roll, pitch, yaw):
+def quat_from_euler_xyz(roll, pitch, yaw):  # 欧拉角转四元数
     cy = torch.cos(yaw * 0.5)
     sy = torch.sin(yaw * 0.5)
     cr = torch.cos(roll * 0.5)
@@ -250,13 +250,13 @@ def compute_heading_and_up(
 ):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
     num_envs = torso_rotation.shape[0]
-    target_dirs = normalize(to_target)
+    target_dirs = normalize(to_target)  # 目标方向向量
 
-    torso_quat = quat_mul(torso_rotation, inv_start_rot)
-    up_vec = get_basis_vector(torso_quat, vec1).view(num_envs, 3)
-    heading_vec = get_basis_vector(torso_quat, vec0).view(num_envs, 3)
+    torso_quat = quat_mul(torso_rotation, inv_start_rot)  # 与起始的相对旋转
+    up_vec = get_basis_vector(torso_quat, vec1).view(num_envs, 3)  # 向上的分量
+    heading_vec = get_basis_vector(torso_quat, vec0).view(num_envs, 3)  # 向前的分量
     up_proj = up_vec[:, up_idx]
-    heading_proj = torch.bmm(heading_vec.view(
+    heading_proj = torch.bmm(heading_vec.view(  # batch matrix-matrix product
         num_envs, 1, 3), target_dirs.view(num_envs, 3, 1)).view(num_envs)
 
     return torso_quat, up_proj, heading_proj, up_vec, heading_vec
@@ -277,7 +277,7 @@ def compute_rot(torso_quat, velocity, ang_velocity, targets, torso_positions):
 
 
 @torch.jit.script
-def quat_axis(q, axis=0):
+def quat_axis(q, axis=0):  # 旋转坐标轴
     # type: (Tensor, int) -> Tensor
     basis_vec = torch.zeros(q.shape[0], 3, device=q.device)
     basis_vec[:, axis] = 1
@@ -287,6 +287,7 @@ def quat_axis(q, axis=0):
 """
 Normalization and Denormalization of Tensors
 """
+
 
 @torch.jit.script
 def scale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
@@ -329,6 +330,7 @@ def unscale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor)
     # return normalized tensor
     return x * (upper - lower) * 0.5 + offset
 
+
 @torch.jit.script
 def saturate(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
     """
@@ -346,9 +348,11 @@ def saturate(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch
     """
     return torch.max(torch.min(x, upper), lower)
 
+
 """
 Rotation conversions
 """
+
 
 @torch.jit.script
 def quat_diff_rad(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -382,18 +386,22 @@ def local_to_world_space(pos_offset_local: torch.Tensor, pose_global: torch.Tens
         Position in the global frame. Shape: [N, 3]
     """
     quat_pos_local = torch.cat(
-        [pos_offset_local, torch.zeros(pos_offset_local.shape[0], 1, dtype=torch.float32, device=pos_offset_local.device)],
+        [pos_offset_local, torch.zeros(
+            pos_offset_local.shape[0], 1, dtype=torch.float32, device=pos_offset_local.device)],
         dim=-1
     )
     quat_global = pose_global[:, 3:7]
     quat_global_conj = quat_conjugate(quat_global)
-    pos_offset_global = quat_mul(quat_global, quat_mul(quat_pos_local, quat_global_conj))[:, 0:3]
+    pos_offset_global = quat_mul(quat_global, quat_mul(
+        quat_pos_local, quat_global_conj))[:, 0:3]
 
     result_pos_gloal = pos_offset_global + pose_global[:, 0:3]
 
     return result_pos_gloal
 
 # NB: do not make this function jit, since it is passed around as an argument.
+
+
 def normalise_quat_in_pose(pose):
     """Takes a pose and normalises the quaternion portion of it.
 
@@ -407,6 +415,7 @@ def normalise_quat_in_pose(pose):
     quat /= torch.norm(quat, dim=-1, p=2).reshape(-1, 1)
     return torch.cat([pos, quat], dim=-1)
 
+
 @torch.jit.script
 def my_quat_rotate(q, v):
     shape = q.shape
@@ -418,6 +427,7 @@ def my_quat_rotate(q, v):
         torch.bmm(q_vec.view(shape[0], 1, 3), v.view(
             shape[0], 3, 1)).squeeze(-1) * 2.0
     return a + b + c
+
 
 @torch.jit.script
 def quat_to_angle_axis(q):
@@ -442,6 +452,7 @@ def quat_to_angle_axis(q):
     axis = torch.where(mask_expand, axis, default_axis)
     return angle, axis
 
+
 @torch.jit.script
 def angle_axis_to_exp_map(angle, axis):
     # type: (Tensor, Tensor) -> Tensor
@@ -449,6 +460,7 @@ def angle_axis_to_exp_map(angle, axis):
     angle_expand = angle.unsqueeze(-1)
     exp_map = angle_expand * axis
     return exp_map
+
 
 @torch.jit.script
 def quat_to_exp_map(q):
@@ -458,6 +470,7 @@ def quat_to_exp_map(q):
     angle, axis = quat_to_angle_axis(q)
     exp_map = angle_axis_to_exp_map(angle, axis)
     return exp_map
+
 
 def quaternion_to_matrix(quaternions: torch.Tensor) -> torch.Tensor:
     """
@@ -486,6 +499,7 @@ def quaternion_to_matrix(quaternions: torch.Tensor) -> torch.Tensor:
         -1,
     )
     return mat.reshape(quaternions.shape[:-1] + (3, 3))
+
 
 def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
     """
@@ -528,10 +542,14 @@ def matrix_to_quaternion(matrix: torch.Tensor) -> torch.Tensor:
 
     quat_by_rijk = torch.stack(
         [
-            torch.stack([q_abs[..., 0] ** 2, m21 - m12, m02 - m20, m10 - m01], dim=-1),
-            torch.stack([m21 - m12, q_abs[..., 1] ** 2, m10 + m01, m02 + m20], dim=-1),
-            torch.stack([m02 - m20, m10 + m01, q_abs[..., 2] ** 2, m12 + m21], dim=-1),
-            torch.stack([m10 - m01, m20 + m02, m21 + m12, q_abs[..., 3] ** 2], dim=-1),
+            torch.stack([q_abs[..., 0] ** 2, m21 - m12,
+                        m02 - m20, m10 - m01], dim=-1),
+            torch.stack([m21 - m12, q_abs[..., 1] ** 2,
+                        m10 + m01, m02 + m20], dim=-1),
+            torch.stack([m02 - m20, m10 + m01, q_abs[..., 2]
+                        ** 2, m12 + m21], dim=-1),
+            torch.stack([m10 - m01, m20 + m02, m21 + m12,
+                        q_abs[..., 3] ** 2], dim=-1),
         ],
         dim=-2,
     )
@@ -551,13 +569,14 @@ def quat_to_tan_norm(q):
     ref_tan = torch.zeros_like(q[..., 0:3])
     ref_tan[..., 0] = 1
     tan = my_quat_rotate(q, ref_tan)
-    
+
     ref_norm = torch.zeros_like(q[..., 0:3])
     ref_norm[..., -1] = 1
     norm = my_quat_rotate(q, ref_norm)
-    
+
     norm_tan = torch.cat([tan, norm], dim=len(tan.shape) - 1)
     return norm_tan
+
 
 @torch.jit.script
 def euler_xyz_to_exp_map(roll, pitch, yaw):
@@ -565,6 +584,7 @@ def euler_xyz_to_exp_map(roll, pitch, yaw):
     q = quat_from_euler_xyz(roll, pitch, yaw)
     exp_map = quat_to_exp_map(q)
     return exp_map
+
 
 @torch.jit.script
 def exp_map_to_angle_axis(exp_map):
@@ -585,11 +605,13 @@ def exp_map_to_angle_axis(exp_map):
 
     return angle, axis
 
+
 @torch.jit.script
 def exp_map_to_quat(exp_map):
     angle, axis = exp_map_to_angle_axis(exp_map)
     q = quat_from_angle_axis(angle, axis)
     return q
+
 
 @torch.jit.script
 def slerp(q0, q1, t):
@@ -597,22 +619,22 @@ def slerp(q0, q1, t):
     qx, qy, qz, qw = 0, 1, 2, 3
 
     cos_half_theta = q0[..., qw] * q1[..., qw] \
-                   + q0[..., qx] * q1[..., qx] \
-                   + q0[..., qy] * q1[..., qy] \
-                   + q0[..., qz] * q1[..., qz]
-    
+        + q0[..., qx] * q1[..., qx] \
+        + q0[..., qy] * q1[..., qy] \
+        + q0[..., qz] * q1[..., qz]
+
     neg_mask = cos_half_theta < 0
     q1 = q1.clone()
     q1[neg_mask] = -q1[neg_mask]
     cos_half_theta = torch.abs(cos_half_theta)
     cos_half_theta = torch.unsqueeze(cos_half_theta, dim=-1)
 
-    half_theta = torch.acos(cos_half_theta);
+    half_theta = torch.acos(cos_half_theta)
     sin_half_theta = torch.sqrt(1.0 - cos_half_theta * cos_half_theta)
 
     ratioA = torch.sin((1 - t) * half_theta) / sin_half_theta
-    ratioB = torch.sin(t * half_theta) / sin_half_theta; 
-    
+    ratioB = torch.sin(t * half_theta) / sin_half_theta
+
     new_q_x = ratioA * q0[..., qx:qx+1] + ratioB * q1[..., qx:qx+1]
     new_q_y = ratioA * q0[..., qy:qy+1] + ratioB * q1[..., qy:qy+1]
     new_q_z = ratioA * q0[..., qz:qz+1] + ratioB * q1[..., qz:qz+1]
@@ -621,10 +643,12 @@ def slerp(q0, q1, t):
     cat_dim = len(new_q_w.shape) - 1
     new_q = torch.cat([new_q_x, new_q_y, new_q_z, new_q_w], dim=cat_dim)
 
-    new_q = torch.where(torch.abs(sin_half_theta) < 0.001, 0.5 * q0 + 0.5 * q1, new_q)
+    new_q = torch.where(torch.abs(sin_half_theta) <
+                        0.001, 0.5 * q0 + 0.5 * q1, new_q)
     new_q = torch.where(torch.abs(cos_half_theta) >= 1, q0, new_q)
 
     return new_q
+
 
 @torch.jit.script
 def calc_heading(q):
@@ -639,6 +663,7 @@ def calc_heading(q):
     heading = torch.atan2(rot_dir[..., 1], rot_dir[..., 0])
     return heading
 
+
 @torch.jit.script
 def calc_heading_quat(q):
     # type: (Tensor) -> Tensor
@@ -651,6 +676,7 @@ def calc_heading_quat(q):
 
     heading_q = quat_from_angle_axis(heading, axis)
     return heading_q
+
 
 @torch.jit.script
 def calc_heading_quat_inv(q):

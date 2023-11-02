@@ -38,12 +38,12 @@ from .base.vec_task import VecTask
 import torch
 from typing import Tuple, Dict
 
-from isaacgymenvs.utils.torch_jit_utils import to_torch, get_axis_params, torch_rand_float, normalize, quat_apply, quat_rotate_inverse, quat_from_euler_xyz
+from isaacgymenvs.utils.torch_jit_utils import to_torch, get_axis_params, torch_rand_float, normalize, quat_apply, quat_rotate_inverse, quat_from_euler_xyz, get_euler_xyz
 from isaacgymenvs.tasks.base.vec_task import VecTask
 import tensorboard
 
 
-class AnymalTerrain(VecTask):
+class AnymalTerrainRMA(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
@@ -108,7 +108,7 @@ class AnymalTerrain(VecTask):
         self.curriculum = self.cfg["env"]["terrain"]["curriculum"]
 
         for key in self.rew_scales.keys():
-            self.rew_scales[key] *= self.dt
+            self.rew_scales[key] *= self.dt  # why need this?
 
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
@@ -126,10 +126,12 @@ class AnymalTerrain(VecTask):
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(
             self.sim)
+        # dof_force_tensor = self.gym.acquire_dof_force_tensor(self.sim)
 
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
+        # self.gym.refresh_dof_force_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
@@ -138,13 +140,14 @@ class AnymalTerrain(VecTask):
             self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(
             self.num_envs, self.num_dof, 2)[..., 1]
+        # self.dof_force = gymtorch.wrap_tensor(dof_force_tensor)
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(
             self.num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
         self.base_quat = self.root_states[:, 3:7]
 
         # initialize some data used later on
-        self.common_step_counter = 0
-        self.extras = {}
+        self.common_step_counter = 0  # for refresh push
+        self.extras = {}  # don't know
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         # x vel, y vel, angle vel, yaw vel
         self.commands = torch.zeros(
@@ -164,6 +167,7 @@ class AnymalTerrain(VecTask):
         self.feet_air_time = torch.zeros(
             self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
+        self.last_dof_pos = torch.zeros_like(self.dof_pos)
 
         self.height_points = self.init_height_points()
         self.small_height_point = self.init_custom_height_points(
@@ -366,20 +370,27 @@ class AnymalTerrain(VecTask):
             self.progress_buf >= self.max_episode_length - 1, torch.ones_like(self.reset_buf), self.reset_buf)
 
     def compute_observations(self):
-        self.measured_heights = self.get_heights()
-        heights = torch.clip(self.root_states[:, 2].unsqueeze(
-            1) - 0.5 - self.measured_heights, -1, 1.) * self.height_meas_scale
-        self.obs_buf = torch.cat((self.base_lin_vel * self.lin_vel_scale,
-                                  self.base_ang_vel * self.ang_vel_scale,
-                                  self.projected_gravity,
-                                  self.commands[:, :3] * self.commands_scale,
-                                  self.dof_pos * self.dof_pos_scale,
-                                  self.dof_vel * self.dof_vel_scale,
-                                  heights,
-                                  self.actions
-                                  ), dim=-1)
+        measured_height = self.root_states[:,
+                                           2].unsqueeze(-1)-self.get_height_point()
+        motor_force = self.torques
+        dof_pos = self.dof_pos
+        dof_vel = self.dof_vel
+        # contact = torch.norm(
+        #    self.contact_forces[:, self.feet_indices, :2], dim=2)
+        # contact = torch.where(contact > 0, 1, 0)
+        contact = self.contact_forces[:, self.feet_indices, 2] > 1.
+        r, p, y = get_euler_xyz(self.base_quat)
+        r = r.unsqueeze(-1)
+        p = p.unsqueeze(-1)
+        state_x = torch.cat((dof_pos, dof_vel, r,
+                            p, contact), dim=1)
+        state_a = self.last_actions
+        state_z = torch.cat((motor_force, measured_height,
+                            torch.zeros(self.num_envs, 4).to(self.device)), dim=1)
+        self.obs_buf = torch.cat((state_x, state_a, state_z), dim=1)
 
     def compute_reward(self):
+
         # velocity tracking reward
         lin_vel_error = torch.sum(torch.square(
             self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
@@ -392,13 +403,13 @@ class AnymalTerrain(VecTask):
 
         # other base velocity penalties
         rew_lin_vel_z = torch.square(
-            self.base_lin_vel[:, 2]) * self.rew_scales["lin_vel_z"]
+            self.base_lin_vel[:, 2]) * self.rew_scales["lin_vel_z"]*0
         rew_ang_vel_xy = torch.sum(torch.square(
-            self.base_ang_vel[:, :2]), dim=1) * self.rew_scales["ang_vel_xy"]
+            self.base_ang_vel[:, :2]), dim=1) * self.rew_scales["ang_vel_xy"]*0
 
         # orientation penalty
         rew_orient = torch.sum(torch.square(
-            self.projected_gravity[:, :2]), dim=1) * self.rew_scales["orient"]
+            self.projected_gravity[:, :2]), dim=1) * self.rew_scales["orient"]*0
 
         # base height penalty
         # TODO add target base height to cfg
@@ -422,7 +433,7 @@ class AnymalTerrain(VecTask):
         # stumbling penalty
         stumble = (torch.norm(self.contact_forces[:, self.feet_indices, :2], dim=2) > 5.) * (
             torch.abs(self.contact_forces[:, self.feet_indices, 2]) < 1.)
-        rew_stumble = torch.sum(stumble, dim=1) * self.rew_scales["stumble"]
+        rew_stumble = torch.sum(stumble, dim=1) * self.rew_scales["stumble"]*0
 
         # action rate penalty
         rew_action_rate = torch.sum(torch.square(
@@ -437,11 +448,12 @@ class AnymalTerrain(VecTask):
             self.rew_scales["air_time"]  # reward only on first contact with the ground
         # no reward for zero command
         rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1
+        rew_airTime *= 0  # HACK:
         self.feet_air_time *= ~contact
 
         # cosmetic penalty for hip motion
         rew_hip = torch.sum(torch.abs(self.dof_pos[:, [
-                            0, 3, 6, 9]] - self.default_dof_pos[:, [0, 3, 6, 9]]), dim=1) * self.rew_scales["hip"]
+                            0, 3, 6, 9]] - self.default_dof_pos[:, [0, 3, 6, 9]]), dim=1) * self.rew_scales["hip"]*0
 
         # total reward
         self.rew_buf = rew_lin_vel_xy + rew_ang_vel_z + rew_lin_vel_z + rew_ang_vel_xy + rew_orient + rew_base_height +\
@@ -467,6 +479,16 @@ class AnymalTerrain(VecTask):
         self.episode_sums["air_time"] += rew_airTime
         self.episode_sums["base_height"] += rew_base_height
         self.episode_sums["hip"] += rew_hip
+
+        # Forward
+        # forward_rew = torch.min(self.base_lin_vel[:, 0], 0.35)*20
+        # Lateral Movement and Rotation
+        # rot_rew = (-self.lin_vel_scale[:, 1]**2)-(self.base_ang_vel[:, 2]**2)
+        # rot_rew = rot_rew*21
+        # work
+        # work_rew: torch.Tensor = self.dof_pos-self.last_dof_pos
+        # work_rew = -(self.torques*work_rew).sum(dim=1)*0.002
+        # ground impact
 
     def reset_idx(self, env_ids):
         positions_offset = torch_rand_float(
@@ -602,12 +624,13 @@ class AnymalTerrain(VecTask):
             self.reset_idx(env_ids)
 
         self.compute_observations()
-        if self.add_noise:
-            self.obs_buf += (2 * torch.rand_like(self.obs_buf) -
-                             1) * self.noise_scale_vec
+        # if self.add_noise:
+        #    self.obs_buf += (2 * torch.rand_like(self.obs_buf) -
+        #                     1) * self.noise_scale_vec
 
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
+        self.last_dof_pos[:] = self.dof_pos[:]
 
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             # draw height lines
@@ -686,6 +709,27 @@ class AnymalTerrain(VecTask):
 
         heights1 = self.height_samples[px, py]
 
+        heights2 = self.height_samples[px+1, py+1]
+        heights = torch.min(heights1, heights2)
+        if env_ids is not None:
+            return heights.view(env_ids.shape[0], -1) * self.terrain.vertical_scale
+        else:
+            return heights.view(self.num_envs, -1) * self.terrain.vertical_scale
+
+    def get_height_point(self, env_ids: torch.Tensor = None):
+        if self.cfg["env"]["terrain"]["terrainType"] == 'plane':
+            return torch.zeros(self.num_envs, 1, device=self.device, requires_grad=False)
+        elif self.cfg["env"]["terrain"]["terrainType"] == 'none':
+            raise NameError("Can't measure height with terrain type 'none'")
+        points = self.root_states[env_ids,
+                                  :3] if env_ids is not None else self.root_states[:, :3]
+        points += self.terrain.border_size
+        point = (points/self.terrain.horizontal_scale).long()
+        px = points[:, 0].view(-1)
+        py = points[:, 1].view(-1)
+        px = torch.clip(px, 0, self.height_samples.shape[0]-2)
+        py = torch.clip(py, 0, self.height_samples.shape[1]-2)
+        heights1 = self.height_samples[px, py]
         heights2 = self.height_samples[px+1, py+1]
         heights = torch.min(heights1, heights2)
         if env_ids is not None:

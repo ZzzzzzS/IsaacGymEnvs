@@ -242,6 +242,7 @@ class MultiObserver(AlgoObserver):
 class RLGPUEnv(vecenv.IVecEnv):
     def __init__(self, config_name, num_actors, **kwargs):
         self.env = env_configurations.configurations[config_name]['env_creator'](**kwargs)
+        print("")
 
     def step(self, actions):
         return self.env.step(actions)

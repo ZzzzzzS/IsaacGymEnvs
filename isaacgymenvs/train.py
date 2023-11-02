@@ -61,7 +61,8 @@ def preprocess_train_config(cfg, config_dict):
             units = config_dict['params']['network']['mlp']['units']
             for i, u in enumerate(units):
                 units[i] = u * model_size_multiplier
-            print(f'Modified MLP units by x{model_size_multiplier} to {config_dict["params"]["network"]["mlp"]["units"]}')
+            print(
+                f'Modified MLP units by x{model_size_multiplier} to {config_dict["params"]["network"]["mlp"]["units"]}')
     except KeyError:
         pass
 
@@ -93,12 +94,14 @@ def launch_rlg_hydra(cfg: DictConfig):
     from rl_games.common import env_configurations, vecenv
     from rl_games.torch_runner import Runner
     from rl_games.algos_torch import model_builder
-    from isaacgymenvs.learning import amp_continuous
-    from isaacgymenvs.learning import amp_players
-    from isaacgymenvs.learning import amp_models
-    from isaacgymenvs.learning import amp_network_builder
-    import isaacgymenvs
 
+    from isaacgymenvs.MyAlgorithm.ppo import PPOAgent  # HACK: add my algorithm
+    from isaacgymenvs.MyAlgorithm.ppo import PPOPlayer
+    from isaacgymenvs.MyAlgorithm.ppo2 import online_algorithm_agent
+    from isaacgymenvs.MyAlgorithm.ppo2 import online_algorithm_player
+    from isaacgymenvs.MyAlgorithm.rl_games_adapter import MyNetBuilder
+
+    import isaacgymenvs
 
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_name = f"{cfg.wandb_name}_{time_str}"
@@ -117,13 +120,14 @@ def launch_rlg_hydra(cfg: DictConfig):
     global_rank = int(os.getenv("RANK", "0"))
 
     # sets seed. if seed is -1 will pick a random one
-    cfg.seed = set_seed(cfg.seed, torch_deterministic=cfg.torch_deterministic, rank=global_rank)
+    cfg.seed = set_seed(
+        cfg.seed, torch_deterministic=cfg.torch_deterministic, rank=global_rank)
 
     def create_isaacgym_env(**kwargs):
         envs = isaacgymenvs.make(
-            cfg.seed, 
-            cfg.task_name, 
-            cfg.task.env.numEnvs, 
+            cfg.seed,
+            cfg.task_name,
+            cfg.task.env.numEnvs,
             cfg.sim_device,
             cfg.rl_device,
             cfg.graphics_device_id,
@@ -150,21 +154,26 @@ def launch_rlg_hydra(cfg: DictConfig):
     })
 
     ige_env_cls = isaacgym_task_map[cfg.task_name]
-    dict_cls = ige_env_cls.dict_obs_cls if hasattr(ige_env_cls, 'dict_obs_cls') and ige_env_cls.dict_obs_cls else False
+    dict_cls = ige_env_cls.dict_obs_cls if hasattr(
+        ige_env_cls, 'dict_obs_cls') and ige_env_cls.dict_obs_cls else False
 
     if dict_cls:
-        
+
         obs_spec = {}
         actor_net_cfg = cfg.train.params.network
-        obs_spec['obs'] = {'names': list(actor_net_cfg.inputs.keys()), 'concat': not actor_net_cfg.name == "complex_net", 'space_name': 'observation_space'}
+        obs_spec['obs'] = {'names': list(actor_net_cfg.inputs.keys(
+        )), 'concat': not actor_net_cfg.name == "complex_net", 'space_name': 'observation_space'}
         if "central_value_config" in cfg.train.params.config:
             critic_net_cfg = cfg.train.params.config.central_value_config.network
-            obs_spec['states'] = {'names': list(critic_net_cfg.inputs.keys()), 'concat': not critic_net_cfg.name == "complex_net", 'space_name': 'state_space'}
-        
-        vecenv.register('RLGPU', lambda config_name, num_actors, **kwargs: ComplexObsRLGPUEnv(config_name, num_actors, obs_spec, **kwargs))
+            obs_spec['states'] = {'names': list(critic_net_cfg.inputs.keys(
+            )), 'concat': not critic_net_cfg.name == "complex_net", 'space_name': 'state_space'}
+
+        vecenv.register('RLGPU', lambda config_name, num_actors, **
+                        kwargs: ComplexObsRLGPUEnv(config_name, num_actors, obs_spec, **kwargs))
     else:
 
-        vecenv.register('RLGPU', lambda config_name, num_actors, **kwargs: RLGPUEnv(config_name, num_actors, **kwargs))
+        vecenv.register('RLGPU', lambda config_name, num_actors,
+                        **kwargs: RLGPUEnv(config_name, num_actors, **kwargs))
 
     rlg_config_dict = omegaconf_to_dict(cfg.train)
     rlg_config_dict = preprocess_train_config(cfg, rlg_config_dict)
@@ -182,14 +191,22 @@ def launch_rlg_hydra(cfg: DictConfig):
             wandb_observer = WandbAlgoObserver(cfg)
             observers.append(wandb_observer)
 
-    # register new AMP network builder and agent
     def build_runner(algo_observer):
         runner = Runner(algo_observer)
-        runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
-        runner.player_factory.register_builder('amp_continuous', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
-        model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
-        model_builder.register_network('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
+        # HACK: regist my algorithm
+        runner.algo_factory.register_builder(
+            'myppo', lambda **kwargs: PPOAgent.MyPPOAgent(**kwargs))
+        runner.player_factory.register_builder(
+            'myppo', lambda **kwargs: PPOPlayer.MyPPOPlayer(**kwargs)
+        )
 
+        runner.algo_factory.register_builder(
+            'ppo2', lambda **kwargs: online_algorithm_agent.online_algorithm_agent(**kwargs))
+        runner.player_factory.register_builder(
+            'ppo2', lambda ** kwargs: online_algorithm_player.online_algorithm_player(**kwargs))
+
+        model_builder.register_network(
+            'my_mlp', lambda **kwargs: MyNetBuilder.MyMLPBuilder())
         return runner
 
     # convert CLI arguments into dictionary
@@ -200,8 +217,8 @@ def launch_rlg_hydra(cfg: DictConfig):
 
     # dump config dict
     if not cfg.test:
-        experiment_dir = os.path.join('runs', cfg.train.params.config.name + 
-        '_{date:%d-%H-%M-%S}'.format(date=datetime.now()))
+        experiment_dir = os.path.join('runs', cfg.train.params.config.name +
+                                      '_{date:%d-%H-%M-%S}'.format(date=datetime.now()))
 
         os.makedirs(experiment_dir, exist_ok=True)
         with open(os.path.join(experiment_dir, 'config.yaml'), 'w') as f:

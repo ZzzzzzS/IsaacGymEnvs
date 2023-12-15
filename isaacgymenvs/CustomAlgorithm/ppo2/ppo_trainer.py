@@ -116,11 +116,11 @@ class ppo_trainer:
         mean_kl = 0
 
         for epoch in range(self.num_learning_epochs):
-            for obsv_batch, actions_batch, old_sigma_batch, old_mu_batch, current_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, states_batch \
+            for obsv_batch, actions_batch, old_sigma_batch, old_mu_batch, current_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, states_batch,dones_batch \
                     in self.batch_sampler(self.num_mini_batches):
 
                 state_dict = self.A2CModule.evaluate(
-                    obsv_batch, actions_batch, states_batch)
+                    obsv_batch, actions_batch, states_batch,dones_batch)
 
                 actions_log_prob_batch = state_dict["actions_logprob"]
                 entropy_batch = state_dict["entropy"]

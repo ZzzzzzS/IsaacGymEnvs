@@ -107,7 +107,7 @@ class A2CModule_Continuous(nn.Module):
     def parameters(self, recurse: bool = True):
         return [*self.net.parameters(), *self.distribution.parameters()]
 
-    def get_default_rnn_states(self):
+    def get_default_rnn_states(self) -> torch.Tensor:
         return self.net.get_default_rnn_states()
 
     def get_value_norm(self):
@@ -136,7 +136,15 @@ class A2CModule_Continuous(nn.Module):
         act_mu, value, _ = self.net(obsv)
         return act_mu, value
 
+    def __rnn_dones(self,states:Tensor,not_dones:Tensor) ->Tensor:
+        not_dones=not_dones.reshape([1,-1,1])
+        not_dones=not_dones.repeat([states.shape[0],1,self.states.shape[2]])
+        next_state=states*not_dones
+        return next_state
+    
     def __evaluate_rnn(self, obsv: Tensor, states: Tensor = None, dones: Tensor = None):
+        obsv=obsv.reshape([-1,states.shape[2],obsv.shape[1]])
+        dones=dones.reshape([-1,states.shape[2],1])
         batch_sz = obsv.shape[0]
         actor_num = obsv.shape[1]
         seq_num = batch_sz//self.seq_len
@@ -157,8 +165,7 @@ class A2CModule_Continuous(nn.Module):
         next_states = states
         for i in range(self.seq_len):
             if dones is not None:
-                next_states = not_done[i, :] * \
-                    next_states  # TODO:check if correct
+                next_states=self.__rnn_dones(next_states,not_done[i,:])
 
             act_mu[i, :], value[i, :], next_states = self.net(
                 obsv[i, :], next_states)

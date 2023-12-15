@@ -67,6 +67,10 @@ defaults:
 
 # set the directory where the output files get saved
 hydra:
+  searchpath:
+    - ./isaacgymenvs/CustomEnvironments
+    - ./CustomEnvironments
+
   output_subdir: null
   run:
     dir: .

@@ -114,6 +114,7 @@ class online_algorithm_agent(BaseAlgorithm):
         self.rnn = self.model.is_rnn()
         if self.rnn:
             self.states = self.model.get_default_rnn_states()
+            self.states = self.states.repeat([1,self.num_envs,1])
 
     def device(self):
         return self.device_name
@@ -180,9 +181,14 @@ class online_algorithm_agent(BaseAlgorithm):
                 (new_obsv["obs"], new_obsv["states"]), dim=-1)
         else:
             self.obsv = new_obsv["obs"]
-
+            
         if self.rnn:
-            not_done = 1.0-dones
+            if dones.dtype==torch.bool:
+                not_done = ~dones
+            else:
+                not_done=1.0-dones
+            not_done=not_done.reshape([1,-1,1])
+            not_done=not_done.repeat([self.states.shape[0],1,self.states.shape[2]])
             self.states = self.states*not_done
 
         return rewards, dones, infos
